@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>FloorTrack — Worker Tablet</title>
+
+<!-- ═══════════════════════════════════════════════════════════
+     CONFIGURATION — paste your Supabase values here
+     ═══════════════════════════════════════════════════════════ -->
+<script>
+   const SUPABASE_URL = 'https://xrerfeybtevxqwehcrvd.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhyZXJmZXlidGV2eHF3ZWhjcnZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3Nzc2NTMsImV4cCI6MjA5NTM1MzY1M30.5XzMS11tsdmNAaqb56Y6qg6wKc8NYxlhY5Z6PDSE1Vk';
+  const PRINTER_IP   = 'PASTE_YOUR_PRINT_SERVER_IP_HERE:9100'; // e.g. 192.168.1.42:9100 — shown when you start the print server
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --ink:    #0F1117; --ink2: #3A3D4A; --ink3: #7B7E8C;
+  --paper:  #F6F5F0; --white: #FFFFFF; --border: rgba(15,17,23,.10);
+  --cut:    #1A5CE8; --cut-l:  #E8EFFC;
+  --mold:   #B45309; --mold-l: #FEF3C7;
+  --bake:   #C2390A; --bake-l: #FEE8DF;
+  --done:   #166534; --done-l: #DCFCE7;
+  --radius: 14px;
+}
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+html, body { height: 100%; background: var(--paper); color: var(--ink); font-family: 'DM Sans', system-ui, sans-serif; }
+.app { display: flex; flex-direction: column; height: 100vh; max-width: 560px; margin: 0 auto; }
+
+/* ── Top Bar ── */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 10px; border-bottom: 1px solid var(--border); background: var(--white); }
+.logo { font-family: 'DM Mono', monospace; font-size: 16px; font-weight: 500; }
+.logo span { color: var(--cut); }
+.status-pill { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; color: var(--ink3); background: var(--paper); border: 1px solid var(--border); padding: 4px 10px; border-radius: 20px; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: #ccc; transition: background .3s; }
+.status-dot.live { background: #22c55e; animation: pdot 2s infinite; }
+@keyframes pdot { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── Station Bar ── */
+.station-bar { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid var(--border); background: var(--white); }
+.st-btn { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 12px 8px; font-size: 11px; font-weight: 500; color: var(--ink3); background: transparent; border: none; cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; letter-spacing: .04em; text-transform: uppercase; }
+.st-btn svg { width: 20px; height: 20px; stroke-width: 1.8; }
+.st-btn.cut.active  { color: var(--cut);  border-bottom-color: var(--cut);  background: var(--cut-l); }
+.st-btn.mold.active { color: var(--mold); border-bottom-color: var(--mold); background: var(--mold-l); }
+.st-btn.bake.active { color: var(--bake); border-bottom-color: var(--bake); background: var(--bake-l); }
+.st-btn.lookup.active { color: #6D28D9; border-bottom-color: #6D28D9; background: #EDE9FE; }
+
+/* ── Main ── */
+.main { flex: 1; overflow-y: auto; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.card { background: var(--white); border-radius: var(--radius); border: 1px solid var(--border); padding: 18px; }
+.card-title { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--ink3); margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+.card-title svg { width: 14px; height: 14px; }
+
+/* ── Product type field ── */
+.field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
+.field-input {
+  width: 100%; padding: 11px 14px; border-radius: 10px;
+  border: 1.5px solid var(--border); background: var(--paper);
+  color: var(--ink); font-family: 'DM Sans', sans-serif; font-size: 14px;
+  outline: none; transition: border-color .15s;
+}
+.field-input:focus { border-color: var(--cut); background: var(--white); }
+.field-input.error { border-color: #fca5a5; background: #fef2f2; }
+.field-error { font-size: 11px; color: #991b1b; display: none; }
+.field-error.show { display: block; }
+
+/* ── Baking checkbox ── */
+.bake-check-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
+.bake-check-box { display: flex; align-items: center; gap: 12px; flex: 1; padding: 12px 14px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--paper); transition: all .15s; }
+.bake-check-box:has(input:checked) { border-color: var(--bake); background: var(--bake-l); }
+.bake-check-box input[type=checkbox] { position: absolute; opacity: 0; width: 0; height: 0; }
+.bake-check-visual { width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--border); background: var(--white); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .15s; }
+.bake-check-box:has(input:checked) .bake-check-visual { background: var(--bake); border-color: var(--bake); }
+.bake-check-icon { width: 13px; height: 13px; stroke: white; opacity: 0; transition: opacity .15s; }
+.bake-check-box:has(input:checked) .bake-check-icon { opacity: 1; }
+.bake-check-title { display: block; font-size: 14px; font-weight: 500; color: var(--ink); }
+.bake-check-sub { display: block; font-size: 11px; color: var(--ink3); margin-top: 1px; }
+.bake-badge { display: none; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .06em; background: var(--bake); color: #fff; flex-shrink: 0; }
+.bake-badge.show { display: flex; }
+
+/* ── Product type buttons ── */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.product-btn {
+  padding: 13px 10px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.3;
+  transition: all .12s;
+}
+.product-btn:hover  { background: #EEF2FF; border-color: #A5B4FC; color: #3730A3; }
+.product-btn:active { transform: scale(.96); }
+.product-btn.selected {
+  background: var(--cut);
+  border-color: var(--cut);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(26,92,232,.25);
+}
+
+/* ── Create button ── */
+.action-btn { width: 100%; padding: 16px; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all .12s; }
+.action-btn:active { transform: scale(.97); }
+.action-btn.create { background: var(--cut); color: #fff; }
+.action-btn.create:hover { background: #1449c4; }
+.action-btn.create:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+/* ── Sticker preview ── */
+.sticker-preview { margin-top: 14px; padding: 16px; background: var(--paper); border-radius: 10px; border: 1.5px dashed var(--border); display: none; flex-direction: column; align-items: center; gap: 6px; }
+.sticker-preview.show { display: flex; }
+.sticker-id   { font-family: 'DM Mono', monospace; font-size: 20px; font-weight: 500; letter-spacing: .04em; }
+.sticker-type { font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 20px; background: var(--cut-l); color: var(--cut); letter-spacing: .03em; }
+.barcode-svg  { width: 200px; height: 48px; margin: 4px 0; }
+.sticker-meta { font-size: 11px; color: var(--ink3); text-align: center; line-height: 1.5; }
+.sticker-bake { display: flex; align-items: center; gap: 5px; background: var(--bake); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .08em; padding: 4px 12px; border-radius: 20px; }
+.print-btn { margin-top: 2px; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; background: transparent; border: 1px solid var(--border); color: var(--ink2); display: flex; align-items: center; gap: 6px; transition: background .12s; }
+.print-btn:hover { background: var(--paper); }
+
+/* ── Scan ── */
+.scan-hint { font-size: 12px; color: var(--ink3); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.scan-wrap { position: relative; margin-bottom: 10px; }
+.scan-input { width: 100%; padding: 13px 16px 13px 44px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--paper); color: var(--ink); font-family: 'DM Mono', monospace; font-size: 15px; outline: none; transition: border-color .15s; }
+.scan-input:focus { border-color: var(--cut); background: var(--white); }
+.scan-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--ink3); pointer-events: none; }
+.scan-result { padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; display: none; align-items: flex-start; gap: 8px; margin-bottom: 10px; line-height: 1.5; }
+.scan-result.found    { background: #f0fdf4; border: 1px solid #86efac; color: #166534; display: flex; }
+.scan-result.notfound { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; display: flex; }
+
+/* ── Advance buttons ── */
+.advance-row { display: none; gap: 10px; margin-top: 2px; }
+.advance-row.show { display: flex; }
+.adv-btn { flex: 1; padding: 14px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; transition: all .12s; }
+.adv-btn:active { transform: scale(.97); }
+.adv-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.adv-btn .adv-sub { font-size: 10px; font-weight: 400; opacity: .75; }
+.adv-btn.to-mold { background: var(--mold-l); color: var(--mold); border: 1px solid #fbbf24; }
+.adv-btn.to-bake { background: var(--bake-l); color: var(--bake); border: 1px solid #f9a07c; }
+.adv-btn.to-done { background: var(--done-l); color: var(--done); border: 1px solid #86efac; }
+.adv-btn.single  { background: var(--ink); color: #fff; }
+.adv-btn.single:hover { background: var(--ink2); }
+
+/* ── Scanned crate info pill ── */
+.crate-info-pill {
+  display: none; align-items: center; gap: 8px;
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;
+  font-size: 12px; color: var(--ink2);
+}
+.crate-info-pill.show { display: flex; }
+.crate-info-id   { font-family: 'DM Mono', monospace; font-weight: 500; color: var(--ink); }
+.crate-info-type { padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; background: var(--cut-l); color: var(--cut); }
+
+/* ── Crate detail card ── */
+.detail-card { background: var(--white); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+.detail-header { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.detail-id { font-family: 'DM Mono', monospace; font-size: 20px; font-weight: 500; color: var(--ink); }
+.detail-station-badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; margin-top: 3px; }
+.detail-body { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.detail-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.detail-label { color: var(--ink3); font-size: 12px; }
+.detail-value { color: var(--ink); font-weight: 500; }
+.detail-bake-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.detail-bake-pill.yes { background: var(--bake-l); color: var(--bake); border: 1px solid #f9a07c; }
+.detail-bake-pill.no  { background: var(--done-l); color: var(--done); border: 1px solid #86efac; }
+.detail-history { border-top: 1px solid var(--border); padding: 12px 18px; }
+.detail-history-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ink3); margin-bottom: 10px; }
+.detail-history-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.detail-history-row:last-child { border-bottom: none; }
+.detail-history-time { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--ink3); white-space: nowrap; }
+.detail-history-event { flex: 1; color: var(--ink2); }
+.detail-history-st { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; }
+.detail-empty { font-size: 12px; color: var(--ink3); padding: 8px 0; }
+
+/* ── Queue chips ── */
+.queue-row { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+.crate-chip { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; padding: 4px 9px; border-radius: 5px; border: 1px solid; cursor: default; }
+.chip-cut  { background: var(--cut-l);  border-color: #93b6f5; color: var(--cut); }
+.chip-mold { background: var(--mold-l); border-color: #fbbf24; color: var(--mold); }
+.chip-bake { background: var(--bake-l); border-color: #f9a07c; color: var(--bake); }
+.chip-done { background: var(--done-l); border-color: #86efac; color: var(--done); }
+.queue-empty { font-size: 12px; color: var(--ink3); }
+
+/* ── Events ── */
+.event-list { display: flex; flex-direction: column; }
+.event-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; flex-wrap: wrap; }
+.event-row:last-child { border-bottom: none; }
+.event-id   { font-family: 'DM Mono', monospace; font-weight: 500; color: var(--ink); min-width: 68px; }
+.event-type-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: var(--cut-l); color: var(--cut); white-space: nowrap; }
+.event-desc { flex: 1; color: var(--ink2); min-width: 80px; }
+.event-station { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; }
+.event-time { color: var(--ink3); font-family: 'DM Mono', monospace; font-size: 11px; white-space: nowrap; margin-left: auto; }
+
+/* ── Toast ── */
+.toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(16px); background: var(--ink); color: #fff; padding: 10px 20px; border-radius: 24px; font-size: 13px; font-weight: 500; opacity: 0; transition: all .25s; pointer-events: none; white-space: nowrap; z-index: 999; display: flex; align-items: center; gap: 8px; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin  { to { transform: rotate(360deg); } }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+
+/* ── Camera Scanner ── */
+.camera-btn { width: 100%; padding: 13px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1.5px solid var(--cut); background: var(--cut-l); color: var(--cut); display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .12s; margin-bottom: 10px; }
+.camera-btn:hover { background: #d4e4fa; }
+.camera-btn:active { transform: scale(.97); }
+.camera-btn.scanning { background: var(--cut); color: #fff; border-color: var(--cut); }
+.camera-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+.scanner-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px; }
+.scanner-modal.open { display: flex; }
+.scanner-wrap { position: relative; width: 100%; max-width: 400px; border-radius: 16px; overflow: hidden; background: #000; aspect-ratio: 1; }
+.scanner-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scanner-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.scanner-box { width: 65%; aspect-ratio: 1.8; border: 2.5px solid rgba(255,255,255,.9); border-radius: 10px; box-shadow: 0 0 0 9999px rgba(0,0,0,.45); position: relative; }
+.scanner-line { position: absolute; left: 6%; right: 6%; height: 2px; background: var(--cut); top: 50%; transform: translateY(-50%); border-radius: 2px; animation: scan-line 1.8s ease-in-out infinite; }
+@keyframes scan-line { 0%,100%{top:15%} 50%{top:85%} }
+.scanner-corner { position: absolute; width: 18px; height: 18px; border-color: var(--cut); border-style: solid; border-width: 0; }
+.scanner-corner.tl { top: -1px; left: -1px;  border-top-width: 3px; border-left-width: 3px;  border-radius: 4px 0 0 0; }
+.scanner-corner.tr { top: -1px; right: -1px; border-top-width: 3px; border-right-width: 3px; border-radius: 0 4px 0 0; }
+.scanner-corner.bl { bottom: -1px; left: -1px;  border-bottom-width: 3px; border-left-width: 3px;  border-radius: 0 0 0 4px; }
+.scanner-corner.br { bottom: -1px; right: -1px; border-bottom-width: 3px; border-right-width: 3px; border-radius: 0 0 4px 0; }
+
+.scanner-status { color: #fff; font-size: 13px; font-weight: 500; text-align: center; min-height: 20px; }
+.scanner-status.found { color: #4ade80; }
+.scanner-status.error { color: #f87171; }
+.close-scanner-btn { padding: 10px 28px; border-radius: 24px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); color: #fff; font-size: 14px; font-weight: 500; cursor: pointer; transition: background .12s; }
+.close-scanner-btn:hover { background: rgba(255,255,255,.2); }
+
+/* ── Print ── */
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: fixed; top: 0; left: 0; width: 90mm; height: 60mm; padding: 4mm; display: flex; flex-direction: column; align-items: flex-start; gap: 2mm; background: white; overflow: hidden; }
+  .p-type { font-family: sans-serif; font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: .05em; }
+  .p-bar  { width: 82mm; height: 18mm; }
+  .p-id   { font-family: monospace; font-size: 14pt; font-weight: bold; }
+  .p-meta { font-size: 7.5pt; text-align: left; font-family: sans-serif; color: #444; }
+  .p-bake { display: flex; align-items: center; gap: 5mm; margin-top: 2mm; border: 1.5pt solid #000; padding: 1.5mm 3mm; border-radius: 2mm; width: 100%; }
+  .p-bake-box { width: 6mm; height: 6mm; border: 1.5pt solid #000; border-radius: 1mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10pt; }
+  .p-bake span { font-family: sans-serif; font-size: 9pt; font-weight: bold; letter-spacing: .05em; }
+}
+</style>
+</head>
+<body>
+
+<!-- Hidden print area — only visible when printing -->
+<div class="print-area" id="print-area" style="display:none">
+  <div class="p-type" id="print-type"></div>
+  <svg class="p-bar"  id="print-bar"></svg>
+  <div class="p-id"   id="print-id"></div>
+  <div class="p-meta" id="print-meta"></div>
+  <div class="p-bake" id="print-bake">
+    <div class="p-bake-box" id="print-bake-box"></div>
+    <span>NEEDS BAKING</span>
+  </div>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="logo">Floor<span>Track</span></div>
+    <div class="status-pill">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="station-bar">
+    <button class="st-btn cut active" data-st="cutting" onclick="pickStation('cutting')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9L15 3M6 9l9 6M6 9v6m9-12v6m0-6l-9 6m9 0v6m0-6L6 15m9 6l-9-6"/></svg>
+      Cutting
+    </button>
+    <button class="st-btn mold" data-st="molding" onclick="pickStation('molding')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="8" width="18" height="10" rx="2"/><path d="M7 8V6a2 2 0 012-2h6a2 2 0 012 2v2"/></svg>
+      Molding
+    </button>
+    <button class="st-btn lookup" data-st="lookup" onclick="pickStation('lookup')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Lookup
+    </button>
+  </div>
+
+  <div class="main">
+
+    <!-- Create card (cutting only) -->
+    <div class="card" id="create-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        New batch
+      </div>
+
+      <!-- Product type selector -->
+      <div class="field-row">
+        <div class="field-label">Product type</div>
+        <div class="product-grid" id="product-grid">
+          <button class="product-btn" data-val="W/Fork"           onclick="selectProduct(this)">W/Fork</button>
+          <button class="product-btn" data-val="W/Fork 2"         onclick="selectProduct(this)">W/Fork 2</button>
+          <button class="product-btn" data-val="W/Spoon"          onclick="selectProduct(this)">W/Spoon</button>
+          <button class="product-btn" data-val="W/Spoon 2"        onclick="selectProduct(this)">W/Spoon 2</button>
+          <button class="product-btn" data-val="C/Ice Cream Spoon" onclick="selectProduct(this)">C/Ice Cream Spoon</button>
+          <button class="product-btn" data-val="W/Ice Cream Spoon" onclick="selectProduct(this)">W/Ice Cream Spoon</button>
+          <button class="product-btn" data-val="C/Spoon 1"        onclick="selectProduct(this)">C/Spoon 1</button>
+        </div>
+        <input type="hidden" id="product-type-input" value="">
+        <span class="field-error" id="product-type-error">Please select a product type before printing</span>
+      </div>
+
+      <!-- Needs baking checkbox -->
+      <div class="field-row" style="margin-bottom:14px">
+        <label class="bake-check-label" id="bake-check-label">
+          <div class="bake-check-box" id="bake-check-box">
+            <input type="checkbox" id="needs-baking-input" onchange="onBakingChange()">
+            <div class="bake-check-visual" id="bake-check-visual">
+              <svg class="bake-check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="bake-check-text">
+              <span class="bake-check-title">Needs baking</span>
+              <span class="bake-check-sub">Tick if this batch goes in the oven</span>
+            </div>
+          </div>
+          <div class="bake-badge" id="bake-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4M16 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4M12 8v13M3 17h18"/></svg>
+            BAKE
+          </div>
+        </label>
+      </div>
+
+      <button class="action-btn create" id="create-btn" onclick="createCrate()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M16 2H8l-2 4h12z"/></svg>
+        Print barcode sticker
+      </button>
+
+      <div class="sticker-preview" id="sticker-preview">
+        <div class="sticker-id"   id="sticker-id-display"></div>
+        <div class="sticker-type" id="sticker-type-display"></div>
+        <svg class="barcode-svg"  id="barcode-svg" viewBox="0 0 200 48"></svg>
+        <div class="sticker-bake" id="sticker-bake-indicator" style="display:none">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4M16 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4M12 8v13M3 17h18"/></svg>
+          NEEDS BAKING
+        </div>
+        <div class="sticker-meta" id="sticker-meta"></div>
+        <button class="print-btn" onclick="printSticker()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print sticker
+        </button>
+      </div>
+    </div>
+
+    <!-- Scan card -->
+    <div class="card" id="scan-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M8 12h.01M12 12h.01M16 12h.01"/></svg>
+        Scan crate
+      </div>
+      <button class="camera-btn" id="camera-btn" onclick="openScanner()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Tap to scan barcode with camera
+      </button>
+      <div class="scan-hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <span id="scan-hint-text">Or type crate ID manually and press Enter</span>
+      </div>
+      <div class="scan-wrap">
+        <svg class="scan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <input class="scan-input" id="scan-input" type="text"
+          placeholder="Scan or type crate ID…"
+          autocomplete="off" autocorrect="off"
+          autocapitalize="characters" spellcheck="false"
+          oninput="onScanInput(this.value)"
+          onkeydown="onScanKey(event)" />
+      </div>
+      <div class="scan-result"    id="scan-result"></div>
+      <div class="crate-info-pill" id="crate-info-pill">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L6 7h12z"/></svg>
+        <span class="crate-info-id"   id="crate-info-id"></span>
+        <span class="crate-info-type" id="crate-info-type"></span>
+        <span id="crate-info-station" style="color:var(--ink3);font-size:11px;margin-left:2px"></span>
+      </div>
+
+      <!-- Single advance (cutting→molding, baking→done) -->
+      <div class="advance-row" id="advance-single">
+        <button class="adv-btn single" id="advance-single-btn" onclick="doAdvanceSingle()">
+          <span id="advance-single-label">Move forward</span>
+        </button>
+      </div>
+
+      <!-- Dual choice (molding→baking OR molding→done) -->
+      <div class="advance-row" id="advance-dual">
+        <button class="adv-btn to-bake" id="btn-to-bake" onclick="doAdvanceTo('baking')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4M16 3c0 2-2 2-2 4a3 3 0 006 0c0-2-2-2-2-4"/></svg>
+          Send to Baking
+          <span class="adv-sub">needs baking</span>
+        </button>
+        <button class="adv-btn to-done" id="btn-to-done" onclick="doAdvanceTo('done')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Mark as Done
+          <span class="adv-sub">skip baking</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Lookup result card (lookup mode only) -->
+    <div id="lookup-result-card" style="display:none" class="detail-card">
+      <div class="detail-header">
+        <div>
+          <div class="detail-id" id="detail-id">—</div>
+          <div style="font-size:12px;color:var(--ink3);margin-top:3px" id="detail-type"></div>
+        </div>
+        <div class="detail-station-badge" id="detail-station-badge"></div>
+      </div>
+      <div class="detail-body">
+        <div class="detail-row">
+          <span class="detail-label">Created</span>
+          <span class="detail-value" id="detail-created">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Current station</span>
+          <span class="detail-value" id="detail-station-text">—</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Baking</span>
+          <span class="detail-bake-pill" id="detail-bake-pill">—</span>
+        </div>
+      </div>
+      <div class="detail-history">
+        <div class="detail-history-title">Movement history</div>
+        <div id="detail-history-list"><div class="detail-empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- Queue -->
+    <div class="card" id="queue-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L6 7h12z"/></svg>
+        Crates at this station
+        <span id="queue-count" style="margin-left:auto;font-size:13px;font-weight:600;color:var(--ink)">0</span>
+      </div>
+      <div class="queue-row" id="queue-row">
+        <span class="queue-empty">Loading…</span>
+      </div>
+    </div>
+
+    <!-- Recent events -->
+    <div class="card" id="events-card">
+      <div class="card-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg>
+        Recent events
+      </div>
+      <div class="event-list" id="event-list">
+        <div class="queue-empty">No events yet</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── Config guard ── */
+if (SUPABASE_URL.includes('PASTE_YOUR') || SUPABASE_KEY.includes('PASTE_YOUR')) {
+  document.body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;padding:32px;text-align:center;font-family:system-ui">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C2390A" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <h2 style="font-size:18px;font-weight:600">Configuration needed</h2>
+    <p style="font-size:14px;color:#666;max-width:340px;line-height:1.6">Replace the <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px">PASTE_YOUR_…</code> placeholders at the top of this file with your Supabase credentials.</p>
+  </div>`;
+  throw new Error('Not configured');
+}
+
+/* ── Supabase ── */
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ── Constants ── */
+const STATION_LABEL = { cutting:'Cutting', molding:'Molding', done:'Done' };
+const CHIP_CLASS    = { cutting:'chip-cut', molding:'chip-mold', done:'chip-done' };
+const BADGE_STYLE   = {
+  cutting: 'background:#E8EFFC;color:#1A5CE8',
+  molding: 'background:#FEF3C7;color:#B45309',
+  done:    'background:#DCFCE7;color:#166534',
+};
+
+/* ── State ── */
+let currentStation = 'cutting';
+let foundCrate     = null;
+let crateCounter   = 1;
+let printCrateData = null;
+
+/* ── Connection ── */
+function setOnline(on) {
+  document.getElementById('status-dot').className    = 'status-dot' + (on ? ' live' : '');
+  document.getElementById('status-text').textContent = on ? 'Live' : 'Offline';
+}
+
+/* ── Product type selector ── */
+function selectProduct(btn) {
+  // Deselect all, select tapped one
+  document.querySelectorAll('.product-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('product-type-input').value = btn.dataset.val;
+  // Clear validation error
+  document.getElementById('product-type-error').classList.remove('show');
+  // Hide old sticker preview if product changes
+  document.getElementById('sticker-preview').classList.remove('show');
+}
+
+/* ── Station picker ── */
+function pickStation(st) {
+  currentStation = st;
+  document.querySelectorAll('.st-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.st-btn[data-st="${st}"]`).classList.add('active');
+
+  const isLookup = st === 'lookup';
+  // Create card: cutting only
+  document.getElementById('create-card').style.display       = st === 'cutting' ? '' : 'none';
+  // Scan card: always visible
+  document.getElementById('scan-card').style.display         = '';
+  // Queue + events: hide in lookup mode
+  document.getElementById('queue-card').style.display        = isLookup ? 'none' : '';
+  document.getElementById('events-card').style.display       = isLookup ? 'none' : '';
+  // Lookup result: hidden until a scan happens
+  document.getElementById('lookup-result-card').style.display = 'none';
+
+  const hints = {
+    cutting: 'Scan a crate to move it to Molding',
+    molding: 'Scan a crate to mark it as Done',
+    lookup:  'Scan or type any crate ID to see its full details',
+  };
+  document.getElementById('scan-hint-text').textContent = hints[st] || '';
+  clearScan();
+  if (!isLookup) renderQueue();
+}
+
+/* ── Clear scan state ── */
+function clearScan() {
+  document.getElementById('scan-input').value          = '';
+  document.getElementById('scan-result').className     = 'scan-result';
+  document.getElementById('scan-result').innerHTML     = '';
+  document.getElementById('crate-info-pill').className = 'crate-info-pill';
+  document.getElementById('advance-single').className  = 'advance-row';
+  document.getElementById('advance-dual').className    = 'advance-row';
+  foundCrate = null;
+}
+
+/* ── Scan handlers ── */
+function onScanInput(val) {
+  /* Reset action UI while typing — commit only on Enter */
+  document.getElementById('advance-single').className  = 'advance-row';
+  document.getElementById('advance-dual').className    = 'advance-row';
+  document.getElementById('scan-result').className     = 'scan-result';
+  document.getElementById('crate-info-pill').className = 'crate-info-pill';
+  foundCrate = null;
+  if (!val.trim()) document.getElementById('scan-result').innerHTML = '';
+}
+
+function onScanKey(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const val = document.getElementById('scan-input').value.trim();
+    if (val.length >= 3) lookupCrate(val.toUpperCase());
+  }
+}
+
+/* ── Crate lookup ── */
+async function lookupCrate(id) {
+  const resultEl = document.getElementById('scan-result');
+  resultEl.className = 'scan-result found';
+  resultEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin .6s linear infinite;flex-shrink:0"><path d="M21 12a9 9 0 11-6.22-8.56"/></svg> Looking up ${id}…`;
+  resultEl.style.display = 'flex';
+
+  const { data, error } = await db
+    .from('crates').select('*').eq('batch_number', id).single();
+
+  if (error || !data) {
+    resultEl.className = 'scan-result notfound';
+    resultEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Crate "${id}" not found`;
+    return;
+  }
+
+  /* ── LOOKUP MODE — show full detail card, no advance buttons ── */
+  if (currentStation === 'lookup') {
+    resultEl.className = 'scan-result';
+    resultEl.style.display = 'none';
+    showCrateDetail(data);
+    return;
+  }
+
+  /* ── STATION MODE — existing advance flow ── */
+  if (data.station === 'done') {
+    resultEl.className = 'scan-result found';
+    resultEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg> ${id} is already finished`;
+    return;
+  }
+
+  foundCrate = data;
+  document.getElementById('crate-info-id').textContent      = data.batch_number;
+  document.getElementById('crate-info-type').textContent    = data.product_type || 'Unknown';
+  document.getElementById('crate-info-station').textContent = `· at ${STATION_LABEL[data.station]}`;
+  document.getElementById('crate-info-pill').className      = 'crate-info-pill show';
+
+  if (currentStation === data.station) {
+    const nextLabels = { cutting: 'Move to Molding', molding: 'Mark as Done' };
+    document.getElementById('advance-single-label').textContent = nextLabels[currentStation] || 'Advance';
+    resultEl.className = 'scan-result found';
+    const bakeNote = data.needs_baking ? ' · <strong style="color:var(--bake)">⚠ Needs baking</strong>' : '';
+    resultEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg> ${id} found · ${STATION_LABEL[data.station]}${bakeNote}`;
+    document.getElementById('advance-single').className = 'advance-row show';
+    document.getElementById('advance-dual').className   = 'advance-row';
+  } else {
+    resultEl.className = 'scan-result notfound';
+    resultEl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg> ${id} is at <strong style="margin:0 2px">${STATION_LABEL[data.station]}</strong> — scan it there`;
+    document.getElementById('crate-info-pill').className = 'crate-info-pill';
+    foundCrate = null;
+  }
+}
+
+/* ── Show full crate detail (lookup mode) ── */
+async function showCrateDetail(data) {
+  const BADGE_BG    = { cutting:'#E8EFFC', molding:'#FEF3C7', done:'#DCFCE7' };
+  const BADGE_COLOR = { cutting:'#1A5CE8', molding:'#B45309', done:'#166534' };
+  const card = document.getElementById('lookup-result-card');
+
+  document.getElementById('detail-id').textContent   = data.batch_number;
+  document.getElementById('detail-type').textContent = data.product_type || 'Unknown type';
+
+  const stBadge = document.getElementById('detail-station-badge');
+  stBadge.textContent = STATION_LABEL[data.station] || data.station;
+  stBadge.style.background = BADGE_BG[data.station]    || '#F3F4F6';
+  stBadge.style.color       = BADGE_COLOR[data.station] || '#374151';
+  stBadge.style.border      = `1px solid ${BADGE_COLOR[data.station] || '#9CA3AF'}33`;
+
+  const created = new Date(data.created_at);
+  document.getElementById('detail-created').textContent      = created.toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  document.getElementById('detail-station-text').textContent = STATION_LABEL[data.station] || data.station;
+
+  const bakePill = document.getElementById('detail-bake-pill');
+  if (data.needs_baking) {
+    bakePill.textContent  = '🔥 Needs baking';
+    bakePill.className    = 'detail-bake-pill yes';
+  } else {
+    bakePill.textContent  = '✓ No baking';
+    bakePill.className    = 'detail-bake-pill no';
+  }
+
+  card.style.display = 'block';
+
+  // Load event history for this crate
+  const histEl = document.getElementById('detail-history-list');
+  histEl.innerHTML = '<div class="detail-empty">Loading history…</div>';
+
+  const { data: events } = await db
+    .from('events')
+    .select('event_type, station, created_at, worker_station')
+    .eq('crate_id', data.id)
+    .order('created_at', { ascending: false });
+
+  if (!events || events.length === 0) {
+    histEl.innerHTML = '<div class="detail-empty">No history found</div>';
+    return;
+  }
+
+  const BADGE_BG2    = { cutting:'#E8EFFC', molding:'#FEF3C7', done:'#DCFCE7' };
+  const BADGE_COLOR2 = { cutting:'#1A5CE8', molding:'#B45309', done:'#166534' };
+
+  histEl.innerHTML = events.map(e => {
+    const time = new Date(e.created_at).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    const bg  = BADGE_BG2[e.station]    || '#F3F4F6';
+    const col = BADGE_COLOR2[e.station] || '#374151';
+    return `<div class="detail-history-row">
+      <span class="detail-history-time">${time}</span>
+      <span class="detail-history-event">${e.event_type}</span>
+      <span class="detail-history-st" style="background:${bg};color:${col}">${STATION_LABEL[e.station] || e.station}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Single advance ── */
+async function doAdvanceSingle() {
+  if (!foundCrate) return;
+  const NEXT = { cutting:'molding', molding:'done' };
+  await commitAdvance(foundCrate, NEXT[currentStation]);
+}
+
+/* ── Dual advance ── */
+async function doAdvanceTo(target) {
+  if (!foundCrate) return;
+  document.getElementById('btn-to-bake').disabled = true;
+  document.getElementById('btn-to-done').disabled = true;
+  await commitAdvance(foundCrate, target);
+}
+
+/* ── Commit ── */
+async function commitAdvance(crate, nextStation) {
+  try {
+    const { error } = await db.from('crates')
+      .update({ station: nextStation }).eq('id', crate.id);
+    if (error) throw error;
+
+    const eventType = nextStation === 'done' ? 'Marked complete' : `Moved to ${STATION_LABEL[nextStation]}`;
+    await db.from('events').insert({
+      crate_id: crate.id, event_type: eventType,
+      station: nextStation, worker_station: currentStation,
+    });
+
+    toast('success', nextStation === 'done'
+      ? `${crate.batch_number} (${crate.product_type}) complete ✓`
+      : `${crate.batch_number} → ${STATION_LABEL[nextStation]}`);
+
+    clearScan();
+    renderQueue();
+    loadRecentEvents();
+    setTimeout(() => document.getElementById('scan-input').focus(), 100);
+  } catch (err) {
+    console.error(err);
+    toast('error', 'Could not update — check connection');
+    document.getElementById('btn-to-bake').disabled = false;
+    document.getElementById('btn-to-done').disabled = false;
+  }
+}
+
+/* ── Baking checkbox toggle ── */
+function onBakingChange() {
+  const checked = document.getElementById('needs-baking-input').checked;
+  document.getElementById('bake-badge').classList.toggle('show', checked);
+  document.getElementById('sticker-preview').classList.remove('show');
+}
+
+/* ── Barcode renderer ── */
+function renderBarcode(svgEl, text) {
+  svgEl.innerHTML = '';
+  let s = Math.abs(text.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0));
+  let x = 8;
+  while (x < 192) {
+    const w = (s % 3) + 1, gap = (s % 3) + 1;
+    const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    r.setAttribute('x', x); r.setAttribute('y', 4);
+    r.setAttribute('width', w); r.setAttribute('height', 40);
+    r.setAttribute('fill', '#0F1117');
+    svgEl.appendChild(r);
+    x += w + gap;
+    s = Math.abs((s * 1103515245 + 12345) & 0x7fffffff);
+  }
+}
+
+/* ── Create crate ── */
+async function createCrate() {
+  /* Validate product type */
+  const productType = document.getElementById('product-type-input').value.trim();
+  if (!productType) {
+    document.getElementById('product-type-error').classList.add('show');
+    document.getElementById('product-grid').style.animation = 'shake .3s ease';
+    setTimeout(() => document.getElementById('product-grid').style.animation = '', 350);
+    return;
+  }
+
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Creating…';
+
+  const needsBaking = document.getElementById('needs-baking-input').checked;
+  const batchNum = 'CR-' + String(crateCounter).padStart(4, '0');
+
+  try {
+    const { data: crate, error: ce } = await db
+      .from('crates')
+      .insert({ batch_number: batchNum, station: 'cutting', product_type: productType, needs_baking: needsBaking })
+      .select().single();
+    if (ce) throw ce;
+
+    await db.from('events').insert({
+      crate_id: crate.id, event_type: 'Batch created',
+      station: 'cutting', worker_station: 'cutting',
+    });
+
+    crateCounter++;
+    // Reset product selection for next batch
+    document.querySelectorAll('.product-btn').forEach(b => b.classList.remove('selected'));
+    document.getElementById('product-type-input').value = '';
+    showSticker(batchNum, productType, needsBaking);
+    const printed = await printZPL(batchNum, productType);
+    if (!printed) toast('info', 'Auto-print unavailable — tap Print sticker');
+    else toast('success', `Sticker printed — ${batchNum} · ${productType}${needsBaking ? ' · BAKE' : ''}`);
+    renderQueue();
+    loadRecentEvents();
+  } catch (err) {
+    console.error(err);
+    toast('error', 'Could not create crate — check connection');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M16 2H8l-2 4h12z"/></svg> Print barcode sticker`;
+}
+
+/* ── Show sticker preview ── */
+function showSticker(batchNum, productType, needsBaking) {
+  document.getElementById('sticker-id-display').textContent   = batchNum;
+  document.getElementById('sticker-type-display').textContent = productType;
+  renderBarcode(document.getElementById('barcode-svg'), batchNum + productType);
+  const now = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+  document.getElementById('sticker-meta').textContent = `Created ${now} · Cutting`;
+  // Show/hide baking indicator on sticker preview
+  const bakeIndicator = document.getElementById('sticker-bake-indicator');
+  bakeIndicator.style.display = needsBaking ? 'flex' : 'none';
+  printCrateData = { batchNum, productType, needsBaking };
+  /* Prep hidden print area */
+  document.getElementById('print-id').textContent   = batchNum;
+  document.getElementById('print-type').textContent = productType;
+  renderBarcode(document.getElementById('print-bar'), batchNum + productType);
+  document.getElementById('print-meta').textContent = `Created ${now} · Cutting`;
+  // Baking checkbox on printed label: ✓ if needs baking, empty box if not
+  document.getElementById('print-bake-box').textContent = needsBaking ? '✓' : '';
+  document.getElementById('print-bake').style.fontWeight = needsBaking ? 'bold' : 'normal';
+  document.getElementById('sticker-preview').classList.add('show');
+}
+
+function printSticker() {
+  if (!printCrateData) return;
+  document.getElementById('print-area').style.display = 'flex';
+  window.print();
+  setTimeout(() => document.getElementById('print-area').style.display = 'none', 500);
+}
+
+/* ── TSPL print via Windows print server (TSC printer) ── */
+async function printZPL(batchNum, productType, needsBaking) {
+  if (!PRINTER_IP || PRINTER_IP.includes('PASTE_YOUR')) return false;
+  const now = new Date().toLocaleString('en-GB', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  // TSPL commands for a 90mm x 60mm label at 203dpi
+  // 90mm = 720 dots wide, 60mm = 480 dots tall (at 203dpi: 1mm = 8 dots)
+  // Baking checkbox: filled box ■ + NEEDS BAKING if true, empty box □ + NO BAKING if false
+  const bakeSymbol  = needsBaking ? '[X]' : '[ ]';
+  const bakeText    = needsBaking ? 'NEEDS BAKING' : 'NO BAKING';
+  const tspl = [
+    'SIZE 90 mm, 60 mm',
+    'GAP 3 mm, 0 mm',
+    'CLS',
+    // Product type — bold text top left
+    'TEXT 30,15,"4",0,1,1,"' + productType + '"',
+    // Baking checkbox — top right area
+    'TEXT 440,15,"3",0,1,1,"' + bakeSymbol + ' ' + bakeText + '"',
+    // Divider line
+    'BAR 30,55,620,2',
+    // Barcode — Code 128
+    'BARCODE 30,65,"128",100,1,0,3,3,"' + batchNum + '"',
+    // Crate ID
+    'TEXT 30,185,"4",0,1,1,"' + batchNum + '"',
+    // Timestamp
+    'TEXT 30,230,"2",0,1,1,"Cutting · ' + now + '"',
+    'PRINT 1,1',
+    'END'
+  ].join('\r\n');
+  try {
+    const res = await fetch(`http://${PRINTER_IP}/print`, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain' },
+      body: tspl, signal: AbortSignal.timeout(6000)
+    });
+    const json = await res.json().catch(() => ({}));
+    return json.ok !== false;
+  } catch { return false; }
+}
+
+/* ── Queue ── */
+async function renderQueue() {
+  const row = document.getElementById('queue-row');
+  const countEl = document.getElementById('queue-count');
+  const { data } = await db.from('crates')
+    .select('id,batch_number,station,product_type,needs_baking')
+    .eq('station', currentStation).order('created_at', { ascending: true });
+  const list = data || [];
+  countEl.textContent = list.length;
+  row.innerHTML = list.length
+    ? list.map(c => `<span class="crate-chip ${CHIP_CLASS[c.station]||'chip-cut'}" title="${c.product_type||''}">${c.batch_number}${c.product_type ? ' · ' + c.product_type : ''}${c.needs_baking ? ' 🔥' : ''}</span>`).join('')
+    : '<span class="queue-empty">No crates here right now</span>';
+}
+
+/* ── Recent events ── */
+async function loadRecentEvents() {
+  const { data } = await db.from('events')
+    .select('id,crate_id,event_type,station,created_at,crates(batch_number,product_type,needs_baking)')
+    .order('created_at', { ascending: false }).limit(10);
+  const el = document.getElementById('event-list');
+  const list = data || [];
+  if (!list.length) { el.innerHTML = '<div class="queue-empty">No events yet</div>'; return; }
+  el.innerHTML = list.map(e => {
+    const bn   = e.crates?.batch_number || e.crate_id?.slice(0,8) || '—';
+    const pt   = e.crates?.product_type || '';
+    const nb   = e.crates?.needs_baking || false;
+    const time = new Date(e.created_at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    return `<div class="event-row">
+      <span class="event-id">${bn}</span>
+      ${pt ? `<span class="event-type-badge">${pt}</span>` : ''}${nb ? `<span class="event-type-badge" style="background:var(--bake-l);color:var(--bake)">🔥 Bake</span>` : ''}
+      <span class="event-desc">${e.event_type}</span>
+      <span class="event-station" style="${BADGE_STYLE[e.station]||BADGE_STYLE.done}">${STATION_LABEL[e.station]||e.station}</span>
+      <span class="event-time">${time}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Realtime ── */
+function subscribeRealtime() {
+  db.channel('floortrack-tablet')
+    .on('postgres_changes', { event:'*', schema:'public', table:'crates' }, () => renderQueue())
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'events' }, () => loadRecentEvents())
+    .subscribe(status => setOnline(status === 'SUBSCRIBED'));
+}
+
+/* ── Toast ── */
+let toastTimer;
+function toast(type, msg) {
+  const el = document.getElementById('toast');
+  const icons = {
+    success: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`,
+    error:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg>`,
+    info:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/></svg>`,
+  };
+  el.innerHTML = (icons[type] || '') + msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+/* ── Init counter ── */
+async function initCounter() {
+  const { data } = await db.from('crates')
+    .select('batch_number').order('created_at', { ascending: false }).limit(1);
+  if (data?.length) {
+    const n = parseInt(data[0].batch_number.replace('CR-', ''), 10);
+    if (!isNaN(n)) crateCounter = n + 1;
+  }
+}
+
+/* ── Camera Scanner ── */
+let zxingReader  = null;
+let scannerOpen  = false;
+let scanCooldown = false;
+
+async function openScanner() {
+  const modal = document.getElementById('scanner-modal');
+  const video = document.getElementById('scanner-video');
+  const status = document.getElementById('scanner-status');
+  const btn = document.getElementById('camera-btn');
+
+  modal.classList.add('open');
+  scannerOpen = true;
+  btn.classList.add('scanning');
+  status.textContent = 'Starting camera…';
+  status.className = 'scanner-status';
+
+  try {
+    if (!zxingReader) {
+      const hints = new Map();
+      // Prioritise Code 128 (what our labels use) but accept all 1D barcodes
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.QR_CODE,
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    }
+
+    // Prefer rear camera on tablets
+    const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    const rear = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+    const deviceId = rear ? rear.deviceId : undefined;
+
+    await zxingReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
+      if (!result || scanCooldown) return;
+      const text = result.getText().trim().toUpperCase();
+      if (!text) return;
+
+      // Flash feedback
+      scanCooldown = true;
+      status.textContent = '✓ ' + text;
+      status.className = 'scanner-status found';
+
+      // Short delay so user sees the confirmation, then close + lookup
+      setTimeout(() => {
+        closeScanner();
+        document.getElementById('scan-input').value = text;
+        lookupCrate(text);
+        setTimeout(() => { scanCooldown = false; }, 1500);
+      }, 500);
+    });
+
+    status.textContent = 'Point camera at barcode';
+  } catch (err) {
+    console.error('Camera error:', err);
+    if (err.name === 'NotAllowedError') {
+      status.textContent = 'Camera permission denied — allow camera access and try again';
+    } else {
+      status.textContent = 'Camera not available — type the ID manually';
+    }
+    status.className = 'scanner-status error';
+  }
+}
+
+function closeScanner() {
+  const modal = document.getElementById('scanner-modal');
+  const btn   = document.getElementById('camera-btn');
+  modal.classList.remove('open');
+  scannerOpen = false;
+  btn.classList.remove('scanning');
+  document.getElementById('scanner-status').textContent = 'Point camera at barcode';
+  document.getElementById('scanner-status').className = 'scanner-status';
+  if (zxingReader) {
+    try { zxingReader.reset(); } catch(e) {}
+  }
+}
+
+// Close scanner on back button / swipe back
+window.addEventListener('popstate', closeScanner);
+
+/* ── Boot ── */
+async function init() {
+  await initCounter();
+  pickStation('cutting');
+  loadRecentEvents();
+  subscribeRealtime();
+}
+init();
+</script>
+</body>
+</html>
